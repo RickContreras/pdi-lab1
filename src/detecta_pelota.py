@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import os
 import json
+from datetime import datetime
 
 # Variables globales
 pausar_video = False
@@ -269,3 +270,274 @@ cv2.destroyAllWindows()
 
 print("Detección completada!")
 print(f"Puntos de trayectoria capturados: {len(trayectoria)}")
+
+def test_ball_detection(video_path):
+    """Probar detección de pelota en tiempo real"""
+    
+    if not os.path.exists(video_path):
+        print(f"Error: No se encuentra el video en {video_path}")
+        return
+    
+    cap = cv2.VideoCapture(video_path)
+    
+    if not cap.isOpened():
+        print("Error: No se puede abrir el video")
+        return
+    
+    # Parámetros de detección para pelota (ajustar según el color)
+    # Para pelota naranja/amarilla
+    lower_orange = np.array([10, 100, 100])
+    upper_orange = np.array([25, 255, 255])
+    
+    # Para pelota blanca
+    lower_white = np.array([0, 0, 200])
+    upper_white = np.array([255, 30, 255])
+    
+    frame_count = 0
+    detections = 0
+    
+    print("Presiona 'q' para salir, 's' para pausar")
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        # Convertir a HSV
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        
+        # Crear máscaras
+        mask_orange = cv2.inRange(hsv, lower_orange, upper_orange)
+        mask_white = cv2.inRange(hsv, lower_white, upper_white)
+        
+        # Combinar máscaras
+        mask = cv2.bitwise_or(mask_orange, mask_white)
+        
+        # Operaciones morfológicas
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        
+        # Encontrar contornos
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        ball_detected = False
+        
+        if contours:
+            for contour in contours:
+                area = cv2.contourArea(contour)
+                if area > 50:  # Área mínima
+                    # Calcular centro y radio
+                    (x, y), radius = cv2.minEnclosingCircle(contour)
+                    center = (int(x), int(y))
+                    radius = int(radius)
+                    
+                    if radius > 5:  # Radio mínimo
+                        # Dibujar círculo
+                        cv2.circle(frame, center, radius, (0, 255, 0), 2)
+                        cv2.circle(frame, center, 2, (0, 0, 255), -1)
+                        
+                        # Mostrar información
+                        cv2.putText(frame, f"Pelota: ({center[0]}, {center[1]})", 
+                                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                        
+                        ball_detected = True
+                        detections += 1
+                        break
+        
+        # Mostrar estado de detección
+        status = "DETECTADA" if ball_detected else "NO DETECTADA"
+        color = (0, 255, 0) if ball_detected else (0, 0, 255)
+        cv2.putText(frame, f"Frame {frame_count}: {status}", 
+                   (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        
+        # Mostrar estadísticas
+        detection_rate = (detections / (frame_count + 1)) * 100
+        cv2.putText(frame, f"Deteccion: {detection_rate:.1f}%", 
+                   (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        
+        # Mostrar frame
+        cv2.imshow('Deteccion de Pelota', frame)
+        cv2.imshow('Mascara', mask)
+        
+        frame_count += 1
+        
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            break
+        elif key == ord('s'):
+            cv2.waitKey(0)  # Pausar
+    
+    cap.release()
+    cv2.destroyAllWindows()
+    
+    print(f"\nResultados:")
+    print(f"Total de frames procesados: {frame_count}")
+    print(f"Frames con detección: {detections}")
+    print(f"Tasa de detección: {(detections/frame_count)*100:.2f}%")
+
+def capture_detection_frames(video_path, output_dir="capturas"):
+    """Capturar frames mostrando el proceso de detección"""
+    
+    # Crear directorio de salida
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    cap = cv2.VideoCapture(video_path)
+    
+    if not cap.isOpened():
+        print("Error: No se puede abrir el video")
+        return
+    
+    # Parámetros de detección
+    lower_orange = np.array([10, 100, 100])
+    upper_orange = np.array([25, 255, 255])
+    lower_white = np.array([0, 0, 200])
+    upper_white = np.array([255, 30, 255])
+    
+    frame_count = 0
+    capture_interval = 30  # Capturar cada 30 frames
+    
+    print(f"Capturando frames en: {output_dir}")
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        # Procesar solo algunos frames para captura
+        if frame_count % capture_interval == 0:
+            
+            # Frame original
+            original = frame.copy()
+            
+            # Convertir a HSV
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            
+            # Crear máscaras
+            mask_orange = cv2.inRange(hsv, lower_orange, upper_orange)
+            mask_white = cv2.inRange(hsv, lower_white, upper_white)
+            mask = cv2.bitwise_or(mask_orange, mask_white)
+            
+            # Operaciones morfológicas
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            mask_processed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+            mask_processed = cv2.morphologyEx(mask_processed, cv2.MORPH_OPEN, kernel)
+            
+            # Encontrar contornos
+            contours, _ = cv2.findContours(mask_processed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Frame con detección
+            detection_frame = frame.copy()
+            ball_detected = False
+            
+            if contours:
+                for contour in contours:
+                    area = cv2.contourArea(contour)
+                    if area > 50:
+                        (x, y), radius = cv2.minEnclosingCircle(contour)
+                        center = (int(x), int(y))
+                        radius = int(radius)
+                        
+                        if radius > 5:
+                            cv2.circle(detection_frame, center, radius, (0, 255, 0), 2)
+                            cv2.circle(detection_frame, center, 2, (0, 0, 255), -1)
+                            cv2.putText(detection_frame, f"Pelota: ({center[0]}, {center[1]})", 
+                                       (center[0]-50, center[1]-20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                            ball_detected = True
+            
+            # Agregar información al frame
+            status = "DETECTADA" if ball_detected else "NO DETECTADA"
+            color = (0, 255, 0) if ball_detected else (0, 0, 255)
+            cv2.putText(detection_frame, f"Frame {frame_count}: {status}", 
+                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            
+            # Crear composición de 4 imágenes
+            # Redimensionar para composición
+            h, w = original.shape[:2]
+            new_h, new_w = h//2, w//2
+            
+            img1 = cv2.resize(original, (new_w, new_h))
+            img2 = cv2.resize(cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR), (new_w, new_h))
+            img3 = cv2.resize(cv2.cvtColor(mask_processed, cv2.COLOR_GRAY2BGR), (new_w, new_h))
+            img4 = cv2.resize(detection_frame, (new_w, new_h))
+            
+            # Agregar títulos
+            cv2.putText(img1, "Original", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.putText(img2, "Mascara Color", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.putText(img3, "Mascara Procesada", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.putText(img4, "Deteccion", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            
+            # Combinar imágenes
+            top_row = np.hstack([img1, img2])
+            bottom_row = np.hstack([img3, img4])
+            combined = np.vstack([top_row, bottom_row])
+            
+            # Guardar captura
+            filename = f"{output_dir}/frame_{frame_count:06d}_{'detected' if ball_detected else 'not_detected'}.jpg"
+            cv2.imwrite(filename, combined)
+            print(f"Capturado: {filename}")
+        
+        frame_count += 1
+    
+    cap.release()
+    print(f"\nCapturas guardadas en: {output_dir}")
+    print(f"Total de frames procesados: {frame_count}")
+
+def show_existing_captures(directory="capturas"):
+    """Mostrar capturas existentes"""
+    if not os.path.exists(directory):
+        print(f"No existe el directorio: {directory}")
+        return
+    
+    files = [f for f in os.listdir(directory) if f.endswith('.jpg')]
+    files.sort()
+    
+    if not files:
+        print(f"No hay capturas en: {directory}")
+        return
+    
+    print(f"\nCapturas encontradas en {directory}:")
+    for i, file in enumerate(files):
+        detected = "✓ DETECTADA" if "detected" in file and "not_detected" not in file else "✗ NO DETECTADA"
+        print(f"{i+1:2d}. {file} - {detected}")
+    
+    # Mostrar las capturas una por una
+    print(f"\nPresiona cualquier tecla para ver las capturas, 'q' para salir")
+    
+    for file in files:
+        img_path = os.path.join(directory, file)
+        img = cv2.imread(img_path)
+        
+        if img is not None:
+            cv2.imshow(f"Captura - {file}", img)
+            key = cv2.waitKey(0) & 0xFF
+            cv2.destroyAllWindows()
+            
+            if key == ord('q'):
+                break
+
+# Ejecutar test
+if __name__ == "__main__":
+    # Buscar archivos de video en el directorio actual
+    video_files = [f for f in os.listdir('.') if f.endswith(('.mp4', '.avi', '.mov'))]
+    
+    print("=== ANÁLISIS DE DETECCIÓN DE PELOTA ===")
+    print("1. Capturar nuevos frames")
+    print("2. Mostrar capturas existentes")
+    
+    choice = input("\nSelecciona una opción (1 o 2): ")
+    
+    if choice == "1":
+        if video_files:
+            video_path = video_files[0]
+            print(f"Procesando: {video_path}")
+            capture_detection_frames(video_path)
+        else:
+            print("No se encontraron archivos de video")
+    
+    elif choice == "2":
+        show_existing_captures()
+    
+    else:
+        print("Opción no válida")

@@ -1,0 +1,17 @@
+{
+  "escala_px_por_m": 265.0,
+  "altura_lanzamiento_m": 1.8,
+  "altura_lanzamiento_px": 477,
+  "punto_lanzamiento": [
+    150,
+    2
+  ],
+  "punto_suelo": [
+    397,
+    479
+  ],
+  "resolucion_frame": [
+    680,
+    480
+  ]
+}
