@@ -32,65 +32,132 @@ def ajuste_parabolico(x, y):
     return popt, pcov
 
 def calcular_parametros_fisicos(x, y, fps=30):
-    """Calcular parámetros físicos del movimiento"""
+    """Calcular parámetros físicos del movimiento con métodos mejorados"""
+    from scipy import stats
+    from scipy.ndimage import gaussian_filter1d
+
     # Convertir frames a tiempo
     t = np.arange(len(x)) / fps
-    
-    # Calcular velocidades usando diferencias finitas
     dt = 1/fps
-    
-    # Usar diferencias finitas centradas para mayor precisión
-    vx = np.zeros_like(x)
-    vy = np.zeros_like(y)
-    
-    # Diferencias hacia adelante para el primer punto
-    vx[0] = (x[1] - x[0]) / dt
-    vy[0] = (y[1] - y[0]) / dt
-    
-    # Diferencias centradas para puntos intermedios
-    for i in range(1, len(x)-1):
-        vx[i] = (x[i+1] - x[i-1]) / (2*dt)
-        vy[i] = (y[i+1] - y[i-1]) / (2*dt)
-    
-    # Diferencias hacia atrás para el último punto
-    vx[-1] = (x[-1] - x[-2]) / dt
-    vy[-1] = (y[-1] - y[-2]) / dt
-    
-    # Velocidad inicial (promedio de los primeros valores para estabilidad)
-    v0x = np.mean(vx[:3])
-    v0y = np.mean(vy[:3])
+
+    # Suavizar datos con filtro Gaussiano para reducir ruido
+    x_smooth = gaussian_filter1d(x, sigma=1.0)
+    y_smooth = gaussian_filter1d(y, sigma=1.0)
+
+    # MÉTODO 1: Diferencias finitas centradas (mejorado)
+    vx = np.gradient(x_smooth, dt)
+    vy = np.gradient(y_smooth, dt)
+
+    # Suavizar velocidades también
+    vx_smooth = gaussian_filter1d(vx, sigma=0.5)
+    vy_smooth = gaussian_filter1d(vy, sigma=0.5)
+
+    # MÉTODO 2: Ajuste parabólico directo para gravedad
+    # y = a*x² + b*x + c, donde para movimiento projectil: a = -g/(2*v0x²)
+    try:
+        # Ajustar parábola en coordenadas (x,y)
+        coef_parab = np.polyfit(x, y, 2)
+        a_parab = coef_parab[0]
+
+        # Estimar v0x promedio para calcular g
+        v0x_est = np.mean(vx_smooth[:5]) if len(vx_smooth) >= 5 else np.mean(vx_smooth)
+
+        if abs(v0x_est) > 0.1:  # Evitar división por cero
+            g_parabolico = -2 * a_parab * v0x_est**2
+        else:
+            g_parabolico = None
+    except:
+        g_parabolico = None
+
+    # MÉTODO 3: Regresión lineal en vy vs t (original mejorado)
+    if len(t) >= 3:
+        slope_y, intercept_y, r_value_y, p_value_y, std_err_y = stats.linregress(t, vy_smooth)
+        g_regresion = -slope_y
+        r_squared = r_value_y**2
+    else:
+        g_regresion = None
+        r_squared = 0
+
+    # MÉTODO 4: Usar ecuaciones de cinemática
+    # Para movimiento projectil: y = y0 + v0y*t - (1/2)*g*t²
+    # Reorganizar: y = c + b*t + a*t² donde a = -g/2
+    try:
+        t_fit = t - t[0]  # Normalizar tiempo
+        coef_tiempo = np.polyfit(t_fit, y, 2)
+        g_cinematica = -2 * coef_tiempo[0]
+    except:
+        g_cinematica = None
+
+    # MÉTODO 5: Análisis de curvatura local
+    if len(y) >= 5:
+        # Calcular segunda derivada (aceleración) localmente
+        ay_local = np.gradient(vy_smooth, dt)
+        # Tomar valores del medio para evitar efectos de borde
+        mid_start = len(ay_local) // 3
+        mid_end = 2 * len(ay_local) // 3
+        g_curvatura = -np.mean(ay_local[mid_start:mid_end]) if mid_end > mid_start else -np.mean(ay_local)
+    else:
+        g_curvatura = None
+
+    # Determinar mejor estimación de gravedad
+    gravedad_estimaciones = []
+    metodos = []
+
+    if g_regresion is not None and abs(g_regresion) < 50:  # Filtrar valores extremos
+        gravedad_estimaciones.append(g_regresion)
+        metodos.append("Regresión lineal")
+
+    if g_parabolico is not None and abs(g_parabolico) < 50:
+        gravedad_estimaciones.append(g_parabolico)
+        metodos.append("Ajuste parabólico")
+
+    if g_cinematica is not None and abs(g_cinematica) < 50:
+        gravedad_estimaciones.append(g_cinematica)
+        metodos.append("Ecuaciones cinemáticas")
+
+    if g_curvatura is not None and abs(g_curvatura) < 50:
+        gravedad_estimaciones.append(g_curvatura)
+        metodos.append("Análisis de curvatura")
+
+    # Calcular parámetros de velocidad inicial
+    v0x = np.mean(vx_smooth[:3]) if len(vx_smooth) >= 3 else vx_smooth[0]
+    v0y = np.mean(vy_smooth[:3]) if len(vy_smooth) >= 3 else vy_smooth[0]
     v0 = np.sqrt(v0x**2 + v0y**2)
-    
-    # Ángulo de lanzamiento
     angulo = np.arctan2(v0y, v0x) * 180 / np.pi
-    
-    # Calcular aceleración usando ajuste lineal de velocidad vs tiempo
-    # Esto es más robusto que usar gradientes
-    from scipy import stats
-    
-    # Ajuste lineal para velocidad en Y (la gravedad afecta solo a vy)
-    slope_y, intercept_y, r_value_y, p_value_y, std_err_y = stats.linregress(t, vy)
-    g_estimada = -slope_y  # La pendiente de vy vs t es -g
-    
-    # También calcular usando diferencias finitas como método alternativo
-    ay = np.gradient(vy, dt)
-    g_gradiente = -np.mean(ay[2:-2]) if len(ay) > 4 else -np.mean(ay)
-    
-    print(f"Gravedad por regresión lineal: {g_estimada:.2f} m/s²")
-    print(f"Gravedad por gradiente: {g_gradiente:.2f} m/s²")
-    print(f"R² del ajuste lineal: {r_value_y**2:.3f}")
-    
+
+    # Seleccionar mejor estimación de gravedad
+    if gravedad_estimaciones:
+        # Usar la mediana para ser robusto ante outliers
+        g_mejor = np.median(gravedad_estimaciones)
+        g_std = np.std(gravedad_estimaciones)
+    else:
+        g_mejor = 9.81  # Valor teórico si no hay estimaciones válidas
+        g_std = float('inf')
+
+    # Mostrar resultados de métodos
+    print(f"\n=== ANÁLISIS MULTI-MÉTODO DE GRAVEDAD ===")
+    for i, (g_val, metodo) in enumerate(zip(gravedad_estimaciones, metodos)):
+        print(f"{metodo}: {g_val:.2f} m/s²")
+
+    if gravedad_estimaciones:
+        print(f"Promedio: {np.mean(gravedad_estimaciones):.2f} ± {g_std:.2f} m/s²")
+        print(f"Mediana (recomendada): {g_mejor:.2f} m/s²")
+
+    print(f"R² del ajuste lineal: {r_squared:.3f}")
+
     return {
         'v0x': v0x,
         'v0y': v0y,
         'v0': v0,
         'angulo': angulo,
-        'gravedad': g_estimada,
-        'gravedad_alt': g_gradiente,
-        'r_squared': r_value_y**2,
+        'gravedad': g_mejor,
+        'gravedad_std': g_std,
+        'gravedad_metodos': dict(zip(metodos, gravedad_estimaciones)) if gravedad_estimaciones else {},
+        'r_squared': r_squared,
         'tiempo': t,
-        'velocidad_x': vx,
-        'velocidad_y': vy
+        'velocidad_x': vx_smooth,
+        'velocidad_y': vy_smooth,
+        'datos_suavizados': {'x': x_smooth, 'y': y_smooth}
     }
 
 def generar_graficos(x, y, parametros, ajuste_coef):
@@ -98,15 +165,18 @@ def generar_graficos(x, y, parametros, ajuste_coef):
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
     
     # Gráfico 1: Trayectoria
-    ax1.plot(x, y, 'bo-', label='Datos detectados', markersize=4)
+    ax1.plot(x, y, 'bo-', label='Datos detectados', markersize=4, alpha=0.7)
+    if 'datos_suavizados' in parametros:
+        ax1.plot(parametros['datos_suavizados']['x'], parametros['datos_suavizados']['y'],
+                'go-', label='Datos suavizados', markersize=3)
     x_fit = np.linspace(min(x), max(x), 100)
     y_fit = ajuste_coef[0] * x_fit**2 + ajuste_coef[1] * x_fit + ajuste_coef[2]
-    ax1.plot(x_fit, y_fit, 'r-', label='Ajuste parabólico')
+    ax1.plot(x_fit, y_fit, 'r-', label='Ajuste parabólico', linewidth=2)
     ax1.set_xlabel('Posición X (m)')
     ax1.set_ylabel('Posición Y (m)')
-    ax1.set_title('Trayectoria de la Pelota')
+    ax1.set_title('Trayectoria de la Pelota (Mejorada)')
     ax1.legend()
-    ax1.grid(True)
+    ax1.grid(True, alpha=0.3)
     
     # Gráfico 2: Posición vs Tiempo
     t = parametros['tiempo']
@@ -127,17 +197,35 @@ def generar_graficos(x, y, parametros, ajuste_coef):
     ax3.legend()
     ax3.grid(True)
     
-    # Gráfico 4: Información de parámetros
-    ax4.text(0.1, 0.8, f'Velocidad inicial: {parametros["v0"]:.2f} m/s', transform=ax4.transAxes)
-    ax4.text(0.1, 0.7, f'Ángulo de lanzamiento: {parametros["angulo"]:.1f}°', transform=ax4.transAxes)
-    ax4.text(0.1, 0.6, f'Velocidad inicial X: {parametros["v0x"]:.2f} m/s', transform=ax4.transAxes)
-    ax4.text(0.1, 0.5, f'Velocidad inicial Y: {parametros["v0y"]:.2f} m/s', transform=ax4.transAxes)
-    ax4.text(0.1, 0.4, f'Gravedad estimada: {parametros["gravedad"]:.2f} m/s²', transform=ax4.transAxes)
-    ax4.text(0.1, 0.3, f'Altura máxima: {max(y):.2f} m', transform=ax4.transAxes)
-    ax4.text(0.1, 0.2, f'Alcance: {max(x) - min(x):.2f} m', transform=ax4.transAxes)
+    # Gráfico 4: Información de parámetros (mejorado)
+    info_text = []
+    info_text.append(f'Velocidad inicial: {parametros["v0"]:.2f} m/s')
+    info_text.append(f'Ángulo de lanzamiento: {parametros["angulo"]:.1f}°')
+    info_text.append(f'Velocidad inicial X: {parametros["v0x"]:.2f} m/s')
+    info_text.append(f'Velocidad inicial Y: {parametros["v0y"]:.2f} m/s')
+    info_text.append(f'Gravedad (mediana): {parametros["gravedad"]:.2f} m/s²')
+
+    if 'gravedad_std' in parametros and parametros['gravedad_std'] != float('inf'):
+        info_text.append(f'Incertidumbre: ±{parametros["gravedad_std"]:.2f} m/s²')
+
+    info_text.append(f'Altura máxima: {max(y):.2f} m')
+    info_text.append(f'Alcance: {max(x) - min(x):.2f} m')
+
+    # Mostrar métodos usados
+    if 'gravedad_metodos' in parametros and parametros['gravedad_metodos']:
+        info_text.append('\nMétodos de gravedad:')
+        for metodo, valor in parametros['gravedad_metodos'].items():
+            info_text.append(f'  {metodo}: {valor:.2f} m/s²')
+
+    for i, text in enumerate(info_text):
+        y_pos = 0.95 - i * 0.08
+        if y_pos > 0:
+            ax4.text(0.05, y_pos, text, transform=ax4.transAxes,
+                    fontsize=9, verticalalignment='top')
+
     ax4.set_xlim(0, 1)
     ax4.set_ylim(0, 1)
-    ax4.set_title('Parámetros del Movimiento')
+    ax4.set_title('Parámetros del Movimiento (Análisis Mejorado)')
     ax4.axis('off')
     
     plt.tight_layout()
@@ -147,35 +235,81 @@ def generar_graficos(x, y, parametros, ajuste_coef):
 def main():
     # Cargar datos
     frames, x_px, y_px = cargar_coordenadas('results/coords.txt')
+
+    # FILTRAR DATOS HASTA EL SUELO (antes del rebote)
+    # Identificar el punto más bajo (suelo) - frame donde y_px es máximo
+    idx_suelo = np.argmax(y_px)
+    print(f"Suelo detectado en frame {frames[idx_suelo]:.0f} (y_px = {y_px[idx_suelo]:.0f})")
+
+    # Tomar solo datos hasta el suelo (inclusive)
+    frames_pre_rebote = frames[:idx_suelo+1]
+    x_px_pre_rebote = x_px[:idx_suelo+1]
+    y_px_pre_rebote = y_px[:idx_suelo+1]
+
+    print(f"Datos originales: {len(frames)} puntos")
+    print(f"Datos hasta suelo (sin rebote): {len(frames_pre_rebote)} puntos")
+
+    # Convertir a metros usando la escala calibrada con altura total de 180cm
+    # Rango Y: 17-1034 píxeles (1017 píxeles total) para 180cm de altura real
+    escala_calibrada = 564.4  # píxeles/metro (1017 píxeles / 1.8 metros)
+    origen_y_calibrado = 1034  # Punto más bajo detectado (suelo)
+
+    # Convertir datos completos (para comparación)
+    x_m_completo, y_m_completo = convertir_pixeles_a_metros(x_px, y_px, escala_px_por_m=escala_calibrada, origen_y=origen_y_calibrado)
+
+    # Convertir datos hasta el suelo
+    x_m, y_m = convertir_pixeles_a_metros(x_px_pre_rebote, y_px_pre_rebote, escala_px_por_m=escala_calibrada, origen_y=origen_y_calibrado)
     
-    # Convertir a metros usando la escala calibrada con el tamaño real de la pelota (8cm)
-    escala_calibrada = 678.8  # píxeles/metro (calculada con calibrar_escala.py)
-    x_m, y_m = convertir_pixeles_a_metros(x_px, y_px, escala_px_por_m=escala_calibrada, origen_y=1080)
-    
-    print(f"Datos cargados: {len(frames)} puntos")
-    print(f"Escala calibrada: {escala_calibrada:.1f} píxeles/metro (basada en pelota de 8cm)")
+    print(f"\n=== DATOS SIN REBOTE ===")
+    print(f"Puntos analizados: {len(frames_pre_rebote)} puntos")
+    print(f"Escala calibrada: {escala_calibrada:.1f} píxeles/metro (basada en altura total de 180cm)")
     print(f"Rango X: {min(x_m):.3f} - {max(x_m):.3f} m")
     print(f"Rango Y: {min(y_m):.3f} - {max(y_m):.3f} m")
-    
-    # Ajuste parabólico
+
+    # Ajuste parabólico (solo datos hasta suelo)
     coef, cov = ajuste_parabolico(x_m, y_m)
     print(f"Coeficientes parabólicos: a={coef[0]:.4f}, b={coef[1]:.4f}, c={coef[2]:.4f}")
-    
-    # Calcular parámetros físicos
+
+    # Calcular parámetros físicos (solo datos hasta suelo)
     parametros = calcular_parametros_fisicos(x_m, y_m, fps=30)
-    
-    # Mostrar resultados
-    print("\n=== ANÁLISIS DE TRAYECTORIA PARABÓLICA (CALIBRADO) ===")
+
+    # COMPARACIÓN: calcular también con datos completos para ver la diferencia
+    print(f"\n=== COMPARACIÓN: DATOS COMPLETOS (CON REBOTE) ===")
+    parametros_completo = calcular_parametros_fisicos(x_m_completo, y_m_completo, fps=30)
+
+    # Mostrar resultados (sin rebote)
+    print("\n=== ANÁLISIS DE TRAYECTORIA (SIN REBOTE) ===")
     print(f"Velocidad inicial: {parametros['v0']:.2f} m/s")
     print(f"Ángulo de lanzamiento: {parametros['angulo']:.1f}°")
     print(f"Componente horizontal de velocidad: {parametros['v0x']:.2f} m/s")
     print(f"Componente vertical de velocidad: {parametros['v0y']:.2f} m/s")
-    print(f"Gravedad estimada (regresión): {parametros['gravedad']:.2f} m/s²")
-    print(f"Gravedad estimada (gradiente): {parametros['gravedad_alt']:.2f} m/s²")
+    print(f"Gravedad estimada (mediana): {parametros['gravedad']:.2f} m/s²")
+    if 'gravedad_std' in parametros and parametros['gravedad_std'] != float('inf'):
+        print(f"Incertidumbre en gravedad: ±{parametros['gravedad_std']:.2f} m/s²")
     print(f"Confiabilidad del ajuste (R²): {parametros['r_squared']:.3f}")
     print(f"Altura máxima: {max(y_m):.3f} m")
     print(f"Alcance horizontal: {max(x_m) - min(x_m):.3f} m")
-    print(f"Tiempo de vuelo: {len(frames)/30:.2f} s")
+    print(f"Tiempo hasta suelo: {len(frames_pre_rebote)/30:.2f} s")
+
+    # Mostrar comparación
+    print(f"\n=== COMPARACIÓN DE RESULTADOS ===")
+    print(f"{'Parámetro':<25} {'Sin rebote':<15} {'Con rebote':<15} {'Mejora'}")
+    print("-" * 70)
+    print(f"{'Gravedad (m/s²)':<25} {parametros['gravedad']:<15.2f} {parametros_completo['gravedad']:<15.2f} {abs(parametros['gravedad'] - 9.81) < abs(parametros_completo['gravedad'] - 9.81)}")
+    print(f"{'R² ajuste lineal':<25} {parametros['r_squared']:<15.3f} {parametros_completo['r_squared']:<15.3f} {parametros['r_squared'] > parametros_completo['r_squared']}")
+    print(f"{'Incertidumbre (±m/s²)':<25} {parametros.get('gravedad_std', float('inf')):<15.2f} {parametros_completo.get('gravedad_std', float('inf')):<15.2f}")
+    print(f"{'Puntos analizados':<25} {len(frames_pre_rebote):<15} {len(frames):<15}")
+
+    # Análisis de cercanía a g=9.81 m/s²
+    error_sin_rebote = abs(parametros['gravedad'] - 9.81)
+    error_con_rebote = abs(parametros_completo['gravedad'] - 9.81)
+    print(f"\nError respecto a g=9.81 m/s²:")
+    print(f"Sin rebote: {error_sin_rebote:.2f} m/s²")
+    print(f"Con rebote: {error_con_rebote:.2f} m/s²")
+    if error_sin_rebote < error_con_rebote:
+        print("✅ El análisis SIN rebote es más preciso")
+    else:
+        print("⚠️ El análisis CON rebote sigue siendo mejor")
     
     # Análisis de validez
     print(f"\n=== ANÁLISIS DE VALIDEZ ===")
@@ -197,19 +331,19 @@ def main():
     # Generar gráficos
     generar_graficos(x_m, y_m, parametros, coef)
     
-    # Guardar resultados en archivo
+    # Guardar resultados en archivo (solo datos sin rebote)
     resultados = pd.DataFrame({
-        'frame': frames,
-        'x_px': x_px,
-        'y_px': y_px,
+        'frame': frames_pre_rebote,
+        'x_px': x_px_pre_rebote,
+        'y_px': y_px_pre_rebote,
         'x_m': x_m,
         'y_m': y_m,
         'tiempo': parametros['tiempo'],
         'vx': parametros['velocidad_x'],
         'vy': parametros['velocidad_y']
     })
-    resultados.to_csv('results/analisis_completo_calibrado.csv', index=False)
-    print("Datos completos calibrados guardados en results/analisis_completo_calibrado.csv")
+    resultados.to_csv('results/analisis_sin_rebote_calibrado.csv', index=False)
+    print("Datos sin rebote guardados en results/analisis_sin_rebote_calibrado.csv")
 
 if __name__ == '__main__':
     main()
