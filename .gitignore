@@ -49,6 +49,7 @@ Temporary Items
 # iCloud generated files
 *.icloud
 
+results/*
 ### OpenCV ###
 #OpenCV for Mac and Linux
 #build and release folders
