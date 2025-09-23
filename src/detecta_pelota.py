@@ -264,10 +264,64 @@ def detectar_pelota_video(video_path, output_path='results/coords.txt', mostrar_
         # Combinar mascaras
         mask = cv2.bitwise_or(mask1, mask2)
 
-        # Filtros morfologicos para limpiar la mascara
-        kernel = np.ones((3,3), np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        # SUAVIZADO ULTRA AGRESIVO PARA PELOTA PERFECTAMENTE CIRCULAR
+
+        # 1. Pre-suavizado con múltiples filtros gaussianos
+        mask = cv2.GaussianBlur(mask, (7, 7), 1.0)
+        mask = cv2.GaussianBlur(mask, (9, 9), 1.5)
+
+        # 2. Re-binarizar con umbral bajo para suavidad
+        _, mask = cv2.threshold(mask, 100, 255, cv2.THRESH_BINARY)
+
+        # 3. Kernels circulares de diferentes tamaños para máximo suavizado
+        kernel_tiny = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        kernel_medium = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        kernel_large = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        kernel_xl = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+
+        # 4. Dilatación progresiva para conectar fragmentos
+        mask = cv2.dilate(mask, kernel_tiny, iterations=2)
+        mask = cv2.dilate(mask, kernel_small, iterations=1)
+
+        # 5. Múltiples CLOSE para rellenar completamente la pelota
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_small, iterations=4)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_medium, iterations=3)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_large, iterations=2)
+
+        # 6. OPEN agresivo para eliminar todo el ruido
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_medium, iterations=3)
+
+        # 7. CLOSE final con kernel extra grande para redondez perfecta
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_xl, iterations=3)
+
+        # 8. Suavizado gaussiano intenso para bordes ultra suaves
+        mask = cv2.GaussianBlur(mask, (11, 11), 2.0)
+        mask = cv2.GaussianBlur(mask, (9, 9), 1.8)
+
+        # 9. Re-binarizar con umbral muy bajo para mantener suavidad
+        _, mask = cv2.threshold(mask, 80, 255, cv2.THRESH_BINARY)
+
+        # 10. Operación CLOSE final para garantizar redondez
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_large, iterations=2)
+
+        # 11. Suavizado bilateral para preservar bordes suaves
+        mask_float = mask.astype(np.float32) / 255.0
+        mask_bilateral = cv2.bilateralFilter(mask_float, 9, 80, 80)
+        mask = (mask_bilateral * 255).astype(np.uint8)
+
+        # 12. Re-binarizar final
+        _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+
+        # 13. Erosión muy suave para definir bordes finales
+        mask = cv2.erode(mask, kernel_tiny, iterations=1)
+
+        # 14. Último filtro mediano para eliminar imperfecciones microscópicas
+        mask = cv2.medianBlur(mask, 7)
+
+        # 15. Suavizado final gaussiano ultra suave
+        mask = cv2.GaussianBlur(mask, (5, 5), 0.8)
+        _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
 
         # Encontrar contornos
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -322,20 +376,36 @@ def detectar_pelota_video(video_path, output_path='results/coords.txt', mostrar_
                         aceleraciones_y.append(0)
                         vx = vy = ax = ay = 0
 
-                    # Dibujar detección básica y contorno
+                    # Dibujar detección básica y contorno siempre
                     cv2.drawContours(frame, [c], -1, (255, 0, 0), 2)
 
                     # Mostrar información física si está habilitado
-                    if mostrar_fisica and vx is not None:
-                        dibujar_vectores_y_parametros(frame, cx, cy, vx, vy, ax, ay,
-                                                    pos_x_m, pos_y_m, frame_count, tiempo_actual, trayectoria_puntos)
+                    if mostrar_fisica:
+                        if vx is not None and (abs(vx) > 0.01 or abs(vy) > 0.01):
+                            # Dibujar vectores completos cuando hay datos válidos
+                            dibujar_vectores_y_parametros(frame, cx, cy, vx, vy, ax, ay,
+                                                        pos_x_m, pos_y_m, frame_count, tiempo_actual, trayectoria_puntos)
+                        else:
+                            # Mostrar información básica con centroide destacado
+                            cv2.circle(frame, (cx, cy), 10, (0, 255, 0), 3)
+                            cv2.circle(frame, (cx, cy), 3, (0, 0, 255), -1)
+
+                            # Información de posición y frame
+                            cv2.putText(frame, f'Frame: {frame_count}', (10, 30),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                            cv2.putText(frame, f'Pos: ({cx}, {cy})', (10, 60),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                            cv2.putText(frame, f'Pos metros: ({pos_x_m:.2f}, {pos_y_m:.2f})', (10, 90),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                            cv2.putText(frame, 'Calculando velocidad...', (10, 120),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
                     else:
-                        # Mostrar información básica si no hay física
+                        # Solo información básica si no hay física habilitada
                         cv2.circle(frame, (cx, cy), 10, (0, 255, 0), 2)
                         cv2.circle(frame, (cx, cy), 2, (0, 0, 255), -1)
-                        cv2.putText(frame, 'Frame: ' + str(frame_count), (10, 30),
+                        cv2.putText(frame, f'Frame: {frame_count}', (10, 30),
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                        cv2.putText(frame, 'Pos: (' + str(cx) + ', ' + str(cy) + ')', (10, 60),
+                        cv2.putText(frame, f'Pos: ({cx}, {cy})', (10, 60),
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
         if not pelota_detectada:
@@ -355,15 +425,37 @@ def detectar_pelota_video(video_path, output_path='results/coords.txt', mostrar_
             frame_hsv_filename = 'results/frames/frame_' + str(frame_count).zfill(4) + '_hsv.jpg'
             cv2.imwrite(frame_hsv_filename, hsv)
 
-            # Mascara (convertir a 3 canales para consistencia)
-            mask_3channel = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+            # Mascara invertida (fondo blanco, pelota negra) con centroide
+            mask_inverted = cv2.bitwise_not(mask)  # Invertir máscara
+            mask_3channel = cv2.cvtColor(mask_inverted, cv2.COLOR_GRAY2BGR)
+
+            # Agregar centroide a la máscara si se detectó pelota
+            if pelota_detectada:
+                # Centroide como círculo rojo en la máscara
+                cv2.circle(mask_3channel, (cx, cy), 8, (0, 0, 255), 2)  # Círculo rojo
+                cv2.circle(mask_3channel, (cx, cy), 2, (0, 0, 255), -1)  # Punto rojo central
+                # Mostrar coordenadas
+                cv2.putText(mask_3channel, f'({cx},{cy})', (cx + 10, cy - 10),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+
             frame_mask_filename = 'results/frames/frame_' + str(frame_count).zfill(4) + '_mask.jpg'
             cv2.imwrite(frame_mask_filename, mask_3channel)
 
         # Mostrar video si se solicita
         if mostrar_video:
             cv2.imshow('Deteccion de Pelota', frame)
-            cv2.imshow('Mascara', mask)
+            # Mostrar máscara invertida (fondo blanco, pelota negra) con centroide
+            mask_display = cv2.bitwise_not(mask)
+            mask_display_3ch = cv2.cvtColor(mask_display, cv2.COLOR_GRAY2BGR)
+
+            # Agregar centroide a la visualización en tiempo real
+            if pelota_detectada:
+                cv2.circle(mask_display_3ch, (cx, cy), 8, (0, 0, 255), 2)
+                cv2.circle(mask_display_3ch, (cx, cy), 2, (0, 0, 255), -1)
+                cv2.putText(mask_display_3ch, f'({cx},{cy})', (cx + 10, cy - 10),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+
+            cv2.imshow('Mascara', mask_display_3ch)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
