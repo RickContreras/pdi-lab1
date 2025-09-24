@@ -161,71 +161,151 @@ def calcular_parametros_fisicos(x, y, fps=30):
     }
 
 def generar_graficos(x, y, parametros, ajuste_coef):
-    """Generar gráficos de análisis"""
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
-    
-    # Gráfico 1: Trayectoria
-    ax1.plot(x, y, 'bo-', label='Datos detectados', markersize=4, alpha=0.7)
+    """Generar gráficos de análisis con datos teóricos"""
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
+
+    t = parametros['tiempo']
+
+    # Parámetros experimentales para comparación
+    v0x_exp = parametros['v0x']
+    v0y_exp = parametros['v0y']
+    g_exp = parametros['gravedad']
+    x0 = x[0]  # Posición inicial X
+    y0 = y[0]  # Posición inicial Y
+
+    # PARÁMETROS TEÓRICOS usando g = 9.8 m/s² estándar
+    g_teorico = 9.8  # Gravedad teórica estándar
+
+    # Usar los mismos valores iniciales experimentales pero con g teórica
+    v0x_teorico = v0x_exp  # Velocidad inicial X (se conserva)
+    v0y_teorico = v0y_exp  # Velocidad inicial Y (se conserva)
+    x0_teorico = x0  # Posición inicial X (se conserva)
+    y0_teorico = y0  # Posición inicial Y (se conserva)
+
+    # Crear tiempo extendido para curvas teóricas suaves
+    t_teorico = np.linspace(0, max(t)*1.2, 200)
+
+    # ECUACIONES CINEMÁTICAS TEÓRICAS (g = 9.8 m/s²) con condiciones ajustadas
+    x_teorico = x0_teorico + v0x_teorico * t_teorico
+    y_teorico = y0_teorico + v0y_teorico * t_teorico - 0.5 * g_teorico * t_teorico**2
+    vx_teorico = np.full_like(t_teorico, v0x_teorico)  # Velocidad X constante
+    vy_teorico = v0y_teorico - g_teorico * t_teorico  # Velocidad Y = v0y - gt
+
+    # Gráfico 1: Trayectoria Y vs X (EXPERIMENTAL vs TEÓRICO)
+    ax1.plot(x, y, 'bo-', label='Datos experimentales', markersize=4, alpha=0.7)
     if 'datos_suavizados' in parametros:
         ax1.plot(parametros['datos_suavizados']['x'], parametros['datos_suavizados']['y'],
                 'go-', label='Datos suavizados', markersize=3)
+
+    # Ajuste parabólico experimental
     x_fit = np.linspace(min(x), max(x), 100)
     y_fit = ajuste_coef[0] * x_fit**2 + ajuste_coef[1] * x_fit + ajuste_coef[2]
-    ax1.plot(x_fit, y_fit, 'r-', label='Ajuste parabólico', linewidth=2)
+    ax1.plot(x_fit, y_fit, 'r-', linewidth=2,
+             label=f'Ajuste exp: y = {ajuste_coef[0]:.3f}x² + {ajuste_coef[1]:.3f}x + {ajuste_coef[2]:.3f}')
+
+    # Trayectoria teórica
+    mask_positivo = y_teorico >= 0
+    ax1.plot(x_teorico[mask_positivo], y_teorico[mask_positivo], 'g--', linewidth=2,
+             label=f'Teoría cinemática (g={g_teorico} m/s²)', alpha=0.8)
+
     ax1.set_xlabel('Posición X (m)')
     ax1.set_ylabel('Posición Y (m)')
-    ax1.set_title('Trayectoria de la Pelota (Mejorada)')
+    ax1.set_title('Trayectoria: Experimental vs Teórica')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
-    
-    # Gráfico 2: Posición vs Tiempo
-    t = parametros['tiempo']
-    ax2.plot(t, x, 'b-', label='X(t)')
-    ax2.plot(t, y, 'r-', label='Y(t)')
+
+    # Gráfico 2: Posición vs Tiempo (EXPERIMENTAL vs TEÓRICO)
+    ax2.plot(t, x, 'bo-', linewidth=1.5, markersize=3, label='X experimental')
+    ax2.plot(t, y, 'ro-', linewidth=1.5, markersize=3, label='Y experimental')
+
+    # Posiciones teóricas
+    mask_tiempo = y_teorico >= 0
+    ax2.plot(t_teorico, x_teorico, 'b--', linewidth=2, alpha=0.7, label=f'X teórica = {x0_teorico:.2f} + {v0x_teorico:.2f}t')
+    ax2.plot(t_teorico[mask_tiempo], y_teorico[mask_tiempo], 'r--', linewidth=2, alpha=0.7,
+             label=f'Y teórica = {y0_teorico:.2f} + {v0y_teorico:.2f}t - ½({g_teorico})t²')
+
     ax2.set_xlabel('Tiempo (s)')
     ax2.set_ylabel('Posición (m)')
-    ax2.set_title('Posición vs Tiempo')
+    ax2.set_title('Posición vs Tiempo: Experimental vs Teórica')
     ax2.legend()
-    ax2.grid(True)
-    
-    # Gráfico 3: Velocidad vs Tiempo
-    ax3.plot(t, parametros['velocidad_x'], 'b-', label='Vx(t)')
-    ax3.plot(t, parametros['velocidad_y'], 'r-', label='Vy(t)')
+    ax2.grid(True, alpha=0.3)
+
+    # Gráfico 3: Velocidad vs Tiempo (EXPERIMENTAL vs TEÓRICO)
+    ax3.plot(t, parametros['velocidad_x'], 'bo-', linewidth=1.5, markersize=3, label='Vx experimental')
+    ax3.plot(t, parametros['velocidad_y'], 'ro-', linewidth=1.5, markersize=3, label='Vy experimental')
+
+    # Velocidades teóricas
+    ax3.plot(t_teorico, vx_teorico, 'b--', linewidth=2, alpha=0.7, label=f'Vx teórica = {v0x_teorico:.2f} m/s')
+    ax3.plot(t_teorico, vy_teorico, 'r--', linewidth=2, alpha=0.7, label=f'Vy teórica = {v0y_teorico:.2f} - {g_teorico}t')
+
     ax3.set_xlabel('Tiempo (s)')
     ax3.set_ylabel('Velocidad (m/s)')
-    ax3.set_title('Velocidad vs Tiempo')
+    ax3.set_title('Velocidad vs Tiempo: Experimental vs Teórica')
     ax3.legend()
-    ax3.grid(True)
+    ax3.grid(True, alpha=0.3)
     
-    # Gráfico 4: Información de parámetros (mejorado)
+    # Gráfico 4: Información de parámetros y ecuaciones teóricas
     info_text = []
+    info_text.append('=== PARÁMETROS EXPERIMENTALES ===')
     info_text.append(f'Velocidad inicial: {parametros["v0"]:.2f} m/s')
     info_text.append(f'Ángulo de lanzamiento: {parametros["angulo"]:.1f}°')
     info_text.append(f'Velocidad inicial X: {parametros["v0x"]:.2f} m/s')
     info_text.append(f'Velocidad inicial Y: {parametros["v0y"]:.2f} m/s')
-    info_text.append(f'Gravedad (mediana): {parametros["gravedad"]:.2f} m/s²')
+    info_text.append(f'Gravedad estimada: {parametros["gravedad"]:.2f} m/s²')
 
     if 'gravedad_std' in parametros and parametros['gravedad_std'] != float('inf'):
         info_text.append(f'Incertidumbre: ±{parametros["gravedad_std"]:.2f} m/s²')
 
     info_text.append(f'Altura máxima: {max(y):.2f} m')
     info_text.append(f'Alcance: {max(x) - min(x):.2f} m')
+    info_text.append('')
+
+    info_text.append('=== ECUACIONES TEÓRICAS (g=9.8) ===')
+    info_text.append(f'x(t) = {x0_teorico:.2f} + {v0x_teorico:.2f}t')
+    info_text.append(f'y(t) = {y0_teorico:.2f} + {v0y_teorico:.2f}t - ½({g_teorico})t²')
+    info_text.append(f'vₓ(t) = {v0x_teorico:.2f} m/s (constante)')
+    info_text.append(f'vᵧ(t) = {v0y_teorico:.2f} - {g_teorico}t')
+    info_text.append('')
+
+    # Calcular predicciones teóricas con g = 9.8
+    if v0y_teorico > 0:
+        t_vuelo_teorico = 2 * v0y_teorico / g_teorico
+        info_text.append('=== PREDICCIONES TEÓRICAS ===')
+        info_text.append(f'Tiempo de vuelo teórico: {t_vuelo_teorico:.2f} s')
+        x_alcance_teorico = x0_teorico + v0x_teorico * t_vuelo_teorico
+        info_text.append(f'Alcance teórico: {x_alcance_teorico:.2f} m')
+        y_max_teorica = y0_teorico + (v0y_teorico**2) / (2 * g_teorico)
+        info_text.append(f'Altura máx teórica: {y_max_teorica:.2f} m')
+        info_text.append('')
+
+    # Comparación experimental vs teórica
+    info_text.append('=== COMPARACIÓN EXP vs TEÓRICA ===')
+    info_text.append(f'Gravedad exp: {g_exp:.2f} vs teórica: {g_teorico}')
+    error_g = abs(g_exp - g_teorico)
+    info_text.append(f'Error en gravedad: {error_g:.2f} m/s²')
+    if v0y_teorico > 0:
+        t_vuelo_exp = 2 * v0y_exp / g_exp if g_exp > 0 else 0
+        if t_vuelo_exp > 0:
+            info_text.append(f'T vuelo exp: {t_vuelo_exp:.2f}s vs teór: {t_vuelo_teorico:.2f}s')
 
     # Mostrar métodos usados
     if 'gravedad_metodos' in parametros and parametros['gravedad_metodos']:
-        info_text.append('\nMétodos de gravedad:')
+        info_text.append('')
+        info_text.append('=== MÉTODOS DE ANÁLISIS ===')
         for metodo, valor in parametros['gravedad_metodos'].items():
-            info_text.append(f'  {metodo}: {valor:.2f} m/s²')
+            info_text.append(f'{metodo}: {valor:.2f} m/s²')
 
     for i, text in enumerate(info_text):
-        y_pos = 0.95 - i * 0.08
+        y_pos = 0.98 - i * 0.04
         if y_pos > 0:
-            ax4.text(0.05, y_pos, text, transform=ax4.transAxes,
-                    fontsize=9, verticalalignment='top')
+            fontsize = 8 if text.startswith('===') else 7
+            weight = 'bold' if text.startswith('===') else 'normal'
+            ax4.text(0.02, y_pos, text, transform=ax4.transAxes,
+                    fontsize=fontsize, verticalalignment='top', weight=weight)
 
     ax4.set_xlim(0, 1)
     ax4.set_ylim(0, 1)
-    ax4.set_title('Parámetros del Movimiento (Análisis Mejorado)')
+    ax4.set_title('Parámetros y Ecuaciones Cinemáticas', fontweight='bold')
     ax4.axis('off')
     
     plt.tight_layout()
